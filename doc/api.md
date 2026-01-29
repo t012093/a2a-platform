@@ -17,6 +17,7 @@
 
 ### 1.3 Offer
 - `POST /offers` 受領（A2A経由の結果を格納）
+- `POST /offers/{id}/accept` 採択（Contract自動生成）
 - `GET /rfps/{id}/offers` 一覧
 
 ### 1.4 Negotiation

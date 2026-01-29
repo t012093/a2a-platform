@@ -19,6 +19,12 @@
 - 交渉ステータス取得
   - `GET /negotiations/:id/task` で `GetTask` を実行し、Task状態に合わせて `Negotiation.status` を更新
   - `GET /negotiations/:id/subscribe` は `resubscribeTask` をSSEで中継し、status-update時に `Negotiation.status` を更新
+- Offer自動保存
+  - Task/Artifactの `deal.offer` DataPart を検知し `Offer` として保存
+  - `offer_id` または `artifactId` をキーに重複登録を抑制
+- Offer採択の自動Contract生成
+  - `POST /offers/:id/accept` で `Contract` を作成し、採択Offerを `ACCEPTED` に更新
+  - 他Offerの `REJECTED` 化とRFP `CLOSED` はオプション（デフォルト有効）
 - ローカル検証用のA2Aデモエージェントを追加
   - `demo-agent/server.js`（Offer artifactを返して `completed`）
   - `scripts/demo_flow.py`（RFP→dispatch→negotiationId作成）

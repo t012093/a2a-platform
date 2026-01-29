@@ -21,6 +21,7 @@ flowchart LR
 | エージェント登録 | AgentCardの登録・検索 |
 | RFP配信 | SendMessageで複数Agentへ配信 |
 | 交渉追跡 | GetTask/Subscribeで交渉状況を取得 |
+| Offer保存 | A2A ArtifactからOfferを自動保存 |
 | 契約承認 | 両者承認で契約を有効化 |
 | 決済 | Stripeエスクロー → リリース |
 
@@ -72,6 +73,7 @@ npm run dev
 - `GET /rfps/:id/offers`
 
 - `POST /offers`
+- `POST /offers/:id/accept`
 - `POST /contracts`
 - `POST /contracts/:id/approve`
 - `GET /contracts/:id`

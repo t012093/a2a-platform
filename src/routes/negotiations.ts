@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { getTaskFromAgent, subscribeTaskFromAgent } from '../a2a/client.js';
-import type { Task, TaskStatusUpdateEvent } from '@a2a-js/sdk';
+import type { Task, TaskArtifactUpdateEvent, TaskStatusUpdateEvent } from '@a2a-js/sdk';
 
 type NegotiationStatus = 'ACTIVE' | 'INPUT_REQUIRED' | 'COMPLETED' | 'REJECTED' | 'CANCELLED' | 'TIMEOUT';
 
@@ -36,6 +36,101 @@ function isStatusUpdateEvent(event: unknown): event is TaskStatusUpdateEvent {
 
 function isTaskEvent(event: unknown): event is Task {
   return typeof event === 'object' && event !== null && (event as { kind?: string }).kind === 'task';
+}
+
+function isArtifactUpdateEvent(event: unknown): event is TaskArtifactUpdateEvent {
+  return (
+    typeof event === 'object' && event !== null && (event as { kind?: string }).kind === 'artifact-update'
+  );
+}
+
+type OfferCandidate = {
+  artifactId?: string;
+  data: Record<string, unknown>;
+  taskId?: string;
+};
+
+function extractOfferCandidatesFromArtifact(
+  artifact: { artifactId?: string; parts?: Array<{ kind?: string; data?: unknown }> },
+  taskId?: string
+): OfferCandidate[] {
+  const parts = Array.isArray(artifact.parts) ? artifact.parts : [];
+  const results: OfferCandidate[] = [];
+  for (const part of parts) {
+    if (part?.kind !== 'data' || !part.data || typeof part.data !== 'object') {
+      continue;
+    }
+    const data = part.data as Record<string, unknown>;
+    const schema = typeof data.schema === 'string' ? data.schema : '';
+    if (schema === 'deal.offer' || schema.startsWith('deal.offer')) {
+      results.push({
+        artifactId: artifact.artifactId,
+        data,
+        taskId,
+      });
+    }
+  }
+  return results;
+}
+
+function extractOfferCandidatesFromTask(task: Task): OfferCandidate[] {
+  const artifacts = Array.isArray(task.artifacts) ? task.artifacts : [];
+  return artifacts.flatMap((artifact) => extractOfferCandidatesFromArtifact(artifact, task.id));
+}
+
+async function persistOfferCandidates(
+  candidates: OfferCandidate[],
+  negotiation: { rfpId: string; agentId: string }
+): Promise<void> {
+  for (const candidate of candidates) {
+    const offerId = typeof candidate.data.offer_id === 'string' ? candidate.data.offer_id : undefined;
+    const filters: any[] = [];
+    if (offerId) {
+      filters.push({
+        offerJson: {
+          path: ['offer_id'],
+          equals: offerId,
+        },
+      });
+    }
+    if (candidate.artifactId) {
+      filters.push({
+        offerJson: {
+          path: ['_artifactId'],
+          equals: candidate.artifactId,
+        },
+      });
+    }
+    if (filters.length === 0) {
+      continue;
+    }
+
+    const existing = await prisma.offer.findFirst({
+      where: {
+        rfpId: negotiation.rfpId,
+        agentId: negotiation.agentId,
+        OR: filters,
+      },
+    });
+    if (existing) {
+      continue;
+    }
+
+    const offerJson = {
+      ...candidate.data,
+      _artifactId: candidate.artifactId,
+      _taskId: candidate.taskId,
+      _receivedAt: new Date().toISOString(),
+    };
+
+    await prisma.offer.create({
+      data: {
+        rfpId: negotiation.rfpId,
+        agentId: negotiation.agentId,
+        offerJson,
+      },
+    });
+  }
 }
 
 export async function negotiationsRoutes(app: FastifyInstance) {
@@ -83,6 +178,12 @@ export async function negotiationsRoutes(app: FastifyInstance) {
         a2aContextId: task.contextId ?? negotiation.a2aContextId,
       },
     });
+
+    try {
+      await persistOfferCandidates(extractOfferCandidatesFromTask(task), negotiation);
+    } catch (error) {
+      app.log.error({ err: error, negotiationId: id }, 'offer_persist_failed');
+    }
 
     return reply.send({ negotiation: updated, task });
   });
@@ -139,6 +240,20 @@ export async function negotiationsRoutes(app: FastifyInstance) {
               a2aContextId: event.contextId ?? negotiation.a2aContextId,
             },
           });
+          try {
+            await persistOfferCandidates(extractOfferCandidatesFromTask(event), negotiation);
+          } catch (error) {
+            app.log.error({ err: error, negotiationId: id }, 'offer_persist_failed');
+          }
+        } else if (isArtifactUpdateEvent(event)) {
+          const offers = extractOfferCandidatesFromArtifact(event.artifact, event.taskId);
+          if (offers.length > 0) {
+            try {
+              await persistOfferCandidates(offers, negotiation);
+            } catch (error) {
+              app.log.error({ err: error, negotiationId: id }, 'offer_persist_failed');
+            }
+          }
         }
 
         reply.raw.write(`event: a2a\ndata: ${JSON.stringify(event)}\n\n`);
