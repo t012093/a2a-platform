@@ -2,6 +2,28 @@
 
 TypeScript + Fastify + Prisma (PostgreSQL) のAPIサーバです。
 
+## 目的
+企業間のエージェント交渉・契約・決済を **A2Aプロトコル**で接続するためのMVP基盤。
+RFP配信 → 交渉（Task）→ 契約承認 → エスクロー決済までを最小構成で実装します。
+
+## アーキテクチャ（MVP）
+```mermaid
+flowchart LR
+  Client[Client Org] -->|RFP/Approvals| Platform[A2A Platform API]
+  Platform -->|SendMessage / GetTask / Subscribe| Agent[A2A Agent]
+  Platform -->|Escrow/Release| Stripe[Stripe PSP]
+  Platform --> DB[(PostgreSQL)]
+```
+
+## 主要機能（MVP）
+| 領域 | 概要 |
+| --- | --- |
+| エージェント登録 | AgentCardの登録・検索 |
+| RFP配信 | SendMessageで複数Agentへ配信 |
+| 交渉追跡 | GetTask/Subscribeで交渉状況を取得 |
+| 契約承認 | 両者承認で契約を有効化 |
+| 決済 | Stripeエスクロー → リリース |
+
 ## ドキュメント
 - `doc/` に設計/仕様/アーキテクチャ資料を配置
 
@@ -85,6 +107,20 @@ npm run dev
 プラットフォーム側のRFP→dispatch→GetTask検証は以下を利用します。
 ```bash
 /usr/bin/python3 scripts/demo_flow.py
+```
+
+## 交渉フロー（概要）
+```mermaid
+sequenceDiagram
+  participant Client
+  participant Platform
+  participant Agent
+  Client->>Platform: RFP作成
+  Platform->>Agent: SendMessage (RFP DataPart)
+  Agent-->>Platform: Task / status-update / artifact-update
+  Platform-->>Client: 進行状況表示
+  Client->>Platform: 契約承認
+  Platform->>Platform: 決済（Stripe）
 ```
 
 ## 注意
